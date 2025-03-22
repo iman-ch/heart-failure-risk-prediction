@@ -1,0 +1,23 @@
+---
+title: "Heart Failure Prediction"
+output: html_notebook
+---
+
+
+```{r}
+# load data
+hfp_data <- read.csv("data/heart_failure_clinical_records_dataset.csv")
+
+# read structure/summary
+str(hfp_data)
+summary(hfp_data)
+head(hfp_data)
+```
+
+```{r}
+# distribution
+table(hfp_data$DEATH_EVENT)
+prop.table(table(hfp_data$DEATH_EVENT))
+
+```
+203 (67.8%) of patients survived, while 96 (32.1%) died.
