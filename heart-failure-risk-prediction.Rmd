@@ -15,9 +15,132 @@ head(hfp_data)
 ```
 
 ```{r}
+# check missing values
+colSums(is.na(hfp_data))
+
 # distribution
 table(hfp_data$DEATH_EVENT)
 prop.table(table(hfp_data$DEATH_EVENT))
 
 ```
 203 (67.8%) of patients survived, while 96 (32.1%) died.
+
+Which variables are related to whether a patient died from heart failure (response variable (`DEATH_EVENT`)?
+
+`age`
+
+```{r}
+library(ggplot2)
+
+ggplot(hfp_data, aes(x = age, fill = factor(DEATH_EVENT))) +
+  geom_density(alpha = 0.4, color = NA) +
+  labs(title = "Age Density by Death Event", fill = "Death Event") +
+  scale_fill_discrete(name = "Death Event", labels = c("0 (Survived)", "1 (Died)")) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+
+```
+This plot shows the estimated probability density per age. This reveals that `age` might be a significant predictor. More of the patients who died (Class 1), were older than the ones who survived (Class 0) . Although there is an overlap in the classes, the distribution suggests that increasing age is associated with a higher risk of death among heart failure patients.
+
+`ejection_fraction`
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Violin plots for top 3 predictors
+top_vars <- c("ejection_fraction", "serum_creatinine", "time")
+
+for (var in top_vars) {
+  p <- ggplot(hfp_data, aes(x = factor(DEATH_EVENT), y = .data[[var]], fill = factor(DEATH_EVENT))) +
+    geom_violin(trim = FALSE, alpha = 0.6) +
+    geom_boxplot(width = 0.1, fill = "white") +
+    scale_fill_manual(values = c("0" = "pink", "1" = "turquoise"),
+                      labels = c("0 (Survived)", "1 (Died)")) +
+    labs(title = paste(var, "by Death Event"), x = "Death Event", y = var) +
+    theme_minimal()
+  print(p)
+}
+
+
+```
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+box_vars <- dplyr::select(hfp_data,
+  age, platelets, serum_sodium, creatinine_phosphokinase, DEATH_EVENT
+)
+
+# Pivot to long format for facetting
+long_box <- pivot_longer(box_vars, 
+                         cols = -DEATH_EVENT, 
+                         names_to = "Variable", 
+                         values_to = "Value")
+
+# Faceted boxplots
+ggplot(long_box, aes(x = factor(DEATH_EVENT), y = Value, fill = factor(DEATH_EVENT))) +
+  geom_boxplot(alpha = 0.6, outlier.color = "red", outlier.alpha = 0.3) +
+  facet_wrap(~ Variable, scales = "free", ncol = 2) +
+  labs(title = "Boxplots of Additional Continuous Variables by Death Event",
+       x = "Death Event", y = "Value", fill = "Death Event") +
+  scale_fill_manual(values = c("0" = "pink", "1" = "turquoise"),
+                    labels = c("0 (Survived)", "1 (Died)")) +
+  theme_minimal()
+
+```
+
+```{r}
+library(corrplot)
+library(dplyr)
+
+# predictors and response
+cor_matrix_y <- cor(hfp_data)
+cor_matrix_y
+
+corrplot(cor_matrix_y,
+         method = "color",       
+         type = "upper",         # show only upper triangle
+         order = "hclust",       # group similar variables
+         addCoef.col = "black",  # show correlation values
+         tl.cex = 0.5,           # shrink axis text
+         number.cex = 0.4,       # shrink correlation values
+         tl.col = "black",       # axis label color
+         cl.cex = 0.5,           # color legend text size
+         mar = c(1, 1, 2.5, 1))    # adjust plot margins
+
+title("Correlation Matrix of Variables in Heart Failure Dataset", cex.main = 0.75)
+
+```
+  
+PREPROCESSING
+scaling predictors
+```{r}
+binary_vars <- c("sex", "diabetes", "high_blood_pressure", "smoking", "anaemia")
+continuous_vars <- setdiff(names(hfp_data), c(binary_vars, "DEATH_EVENT"))
+
+scaled_cont <- scale(hfp_data[, continuous_vars])
+binary_data <- hfp_data[, binary_vars]
+
+hfp_scaled <- cbind(as.data.frame(scaled_cont), binary_data, DEATH_EVENT = hfp_data$DEATH_EVENT)
+
+head(hfp_scaled)
+```
+
+continuous features were standardized using z-score scaling (mean = 0, sd = 1). this makes sure that the features have equal weight in distance-based methods. the binary features were kept the same to keep their categorical interpretation.
+
+train/test split
+```{r}
+library(caret)
+
+set.seed(2025)
+
+# createDataPartition keeps class data distribution consistent, so same amount of casualties (DEATH_EVENT) set at 1 for training and test
+train_idx <- createDataPartition(hfp_scaled$DEATH_EVENT, p = 0.7, list = FALSE)
+train_data <- hfp_scaled[train_index, ]
+test_data <- hfp_scaled[-train_index, ]
+```
+
