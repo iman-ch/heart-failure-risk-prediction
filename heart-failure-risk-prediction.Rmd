@@ -5,8 +5,13 @@ output: html_notebook
 
 
 ```{r}
+library(pROC)
+library(caret)
+
+
 # load data
 hfp_data <- read.csv("data/heart_failure_clinical_records_dataset.csv")
+
 
 # read structure/summary
 str(hfp_data)
@@ -136,11 +141,218 @@ train/test split
 ```{r}
 library(caret)
 
+hfp_data$DEATH_EVENT <- factor(hfp_data$DEATH_EVENT, levels = c(0, 1), labels = c("Survived", "Died"))
+
 set.seed(2025)
 
 # createDataPartition keeps class data distribution consistent, so same amount of casualties (DEATH_EVENT) set at 1 for training and test
-train_idx <- createDataPartition(hfp_scaled$DEATH_EVENT, p = 0.7, list = FALSE)
+train_index <- createDataPartition(hfp_scaled$DEATH_EVENT, p = 0.7, list = FALSE)
 train_data <- hfp_scaled[train_index, ]
+```
+
+
+```{r}
 test_data <- hfp_scaled[-train_index, ]
+```
+
+K-fold cross validation
+```{r}
+train_control <- trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary, savePredictions = TRUE)
+```
+
+
+Modelling with knn, lda, qda, random forest, decision tree, and svm. Because of having binary values we are performing a conversion in the beginning to designate values for deaths and alive individuals.
+```{r}
+#Classfication Models
+# Convert DEATH_EVENT to a factor for classification since it is numeric (meant for regression)
+#test_data$DEATH_EVENT <- as.factor(test_data$DEATH_EVENT)
+#train_data$DEATH_EVENT <- as.factor(train_data$DEATH_EVENT)
+
+test_data$DEATH_EVENT <- factor(test_data$DEATH_EVENT, levels = c(0, 1), labels = c("Survived", "Died"))
+train_data$DEATH_EVENT <- factor(train_data$DEATH_EVENT, levels = c(0, 1), labels = c("Survived", "Died"))
+
+# QDA Model
+set.seed(2025)
+qda_model <- train(DEATH_EVENT ~ ., data = train_data, method = "qda", trControl = train_control, metric = "ROC")
+print(qda_model)
+
+#LDA Model
+lda_model <- train(DEATH_EVENT ~ ., data = train_data, method = "lda", trControl = train_control, metric = "ROC")
+print(lda_model)
+
+#Logistic Regression
+logistic_regression_model <- train(DEATH_EVENT ~ ., data = train_data, method = "glm", family = "binomial", trControl = train_control, metric = "ROC")
+print (logistic_regression_model)
+
+#KNN
+knn_model <- train(DEATH_EVENT ~ ., data = train_data, method = "knn", trControl = train_control, metric = "ROC")
+print (knn_model)
+
+#SVM
+svm_model <- train(DEATH_EVENT ~ ., data = train_data, method = "svmRadial", trControl = train_control, preProcess = c("center", "scale"), metric = "ROC") 
+print(svm_model)
+
+#Random Forest
+rf_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rf", trControl = train_control, metric = "ROC")
+print(rf_model)
+
+#Decision Tree
+dt_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rpart", trControl = train_control, metric = "ROC")
+print(dt_model)
+
+library(rpart.plot)
+rpart.plot(dt_model$finalModel, main = "Decision Tree for Heart Failure Prediction")
+dt_pred <- predict(dt_model, newdata = test_data)
+confusionMatrix(dt_pred, test_data$DEATH_EVENT)
+
+```
+
+Manually calculating F1
+```{r}
+# Function to calculate F1 from confusion matrix
+calculate_f1 <- function(cm) {
+  precision <- cm$byClass["Pos Pred Value"]
+  recall <- cm$byClass["Sensitivity"]
+  
+  # Handle division by zero
+  if ((precision + recall) == 0) {
+    return(NA)
+  }
+  f1 <- 2 * (precision * recall) / (precision + recall)
+  return(round(f1, 4))
+}
+
+calculate_auc <- function(actual, predicted_probs, positive_label = "Died"){
+  roc_curve <- roc(actual, predicted_probs, levels = c("Survived", "Died"))
+  auc_value <- auc(roc_curve)
+  return(round(auc_value, 4))
+}
+```
+
+Generating Confusion Matrices for each of the models, along with manually calculating F1 and AUC 
+```{r}
+
+# Logistic Regression
+logreg_pred <- predict(logistic_regression_model, newdata = test_data)
+logreg_cm <- confusionMatrix(logreg_pred, test_data$DEATH_EVENT, positive = "Died")
+logreg_f1 <- calculate_f1(logreg_cm)
+print(logreg_cm)
+cat("\nF1: ", logreg_f1, "\n") #Calculating F1
+logreg_probs <- predict(logistic_regression_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, logreg_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+# LDA
+lda_pred <- predict(lda_model, newdata = test_data)
+lda_cm <- confusionMatrix(lda_pred, test_data$DEATH_EVENT, positive = "Died")
+lda_f1 <- calculate_f1(lda_cm)
+print(lda_cm)
+cat("\nF1: ", lda_f1, "\n")
+lda_probs <- predict(lda_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, lda_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+
+# QDA
+qda_pred <- predict(qda_model, newdata = test_data)
+qda_cm <- confusionMatrix(qda_pred, test_data$DEATH_EVENT, positive = "Died")
+qda_f1 <- calculate_f1(qda_cm)
+print(qda_cm)
+cat("\nF1: ", qda_f1, "\n")
+qda_probs <- predict(qda_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, qda_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+# KNN
+knn_pred <- predict(knn_model, newdata = test_data)
+knn_cm <- confusionMatrix(knn_pred, test_data$DEATH_EVENT, positive = "Died")
+knn_f1 <- calculate_f1(knn_cm)
+print(knn_cm)
+cat("\nF1: ", knn_f1, "\n")
+knn_probs <- predict(knn_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, knn_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+# SVM
+svm_pred <- predict(svm_model, newdata = test_data)
+svm_cm <- confusionMatrix(svm_pred, test_data$DEATH_EVENT, positive = "Died")
+svm_f1 <- calculate_f1(svm_cm)
+print(svm_cm)
+cat("\nF1: ", svm_f1, "\n")
+svm_probs <- predict(lda_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, lda_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+# Random Forest
+rf_pred <- predict(rf_model, newdata = test_data)
+rf_cm <- confusionMatrix(rf_pred, test_data$DEATH_EVENT, positive = "Died")
+rf_f1 <- calculate_f1(rf_cm)
+print(rf_cm)
+cat("\nF1: ", rf_f1, "\n")
+rf_probs <- predict(rf_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, rf_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+
+
+# Decision Tree
+dt_pred <- predict(dt_model, newdata = test_data)
+dt_cm <- confusionMatrix(dt_pred, test_data$DEATH_EVENT, positive = "Died")
+dt_f1 <- calculate_f1(dt_cm)
+print(dt_cm)
+cat("\nF1: ", dt_f1, "\n")
+dt_probs <- predict(lda_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, dt_probs$Died) #Calculating AUC
+cat("AUC:", auc_value, "\n\n\n")
+```
+
+
+Plotting the F1, Accuracy, and AUC(ROC). We are extracting the F1 values and Accuracy values that we calculated in the chunk above.
+```{r}
+#Comparing Models
+results <- resamples(list(SVM = svm_model, LogReg = logistic_regression_model, LDA = lda_model, 
+                          QDA = qda_model, RF = rf_model, KNN = knn_model))
+
+# Summary of model comparisons
+summary(results)
+
+
+# Boxplot for Accuracy
+##bwplot(results, metric = "Accuracy")
+get_accuracy <- function(cm) {
+  accuracy <- as.numeric(cm$overall["Accuracy"])
+  return(round(accuracy, 4))
+}
+
+logreg_acc <- get_accuracy(logreg_cm)
+lda_acc <- get_accuracy(lda_cm)
+qda_acc <- get_accuracy(qda_cm)
+knn_acc <- get_accuracy(knn_cm)
+svm_acc <- get_accuracy(svm_cm)
+rf_acc <- get_accuracy(rf_cm)
+dt_acc <- get_accuracy(dt_cm)
+
+accuracy_df <- data.frame(Model = c("LogReg", "LDA", "QDA", "KNN", "SVM","RF", "DT"),
+                          Accuracy = c(logreg_acc, lda_acc, qda_acc, knn_acc, svm_acc, rf_acc, dt_acc))
+# Bar plot for accuracy - used this instead of boxplot because the accuracy were singe points so boxplot was a line rather than box
+barplot(accuracy_df$Accuracy, names.arg = accuracy_df$Model, col = "darkgreen",
+        main = "Accuracy Comparison of Models", ylab = "Accuracy")
+
+
+# Boxplot for F1 Score 
+f1_results <- data.frame(Model = c("Logistic Regression", "LDA", "QDA", "KNN", "SVM", "Random Forest", "Decision Tree"),
+                         F1_Score = c(logreg_f1, lda_f1, qda_f1, knn_f1, svm_f1, rf_f1, dt_f1))
+# boxplot(F1_Score ~ Model, data = f1_results, col = "lightblue",
+#         main = "F1 Score Comparison of Models", ylab = "F1 Score")
+barplot(accuracy_df$Accuracy, names.arg = accuracy_df$Model, col = "orange",
+        main = "Accuracy Comparison of Models", ylab = "Accuracy")
+
+
+# Boxplot for AUC (ROC)
+bwplot(results, metric = "ROC")
 ```
 
