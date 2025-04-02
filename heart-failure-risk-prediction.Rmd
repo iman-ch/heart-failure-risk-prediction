@@ -1,6 +1,8 @@
 ---
 title: "Heart Failure Prediction"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -222,8 +224,10 @@ calculate_f1 <- function(cm) {
   return(round(f1, 4))
 }
 
-calculate_auc <- function(actual, predicted_probs, positive_label = "Died"){
-  roc_curve <- roc(actual, predicted_probs, levels = c("Survived", "Died"))
+calculate_auc <- function(actual, predicted_probs, positive_label = "Died") {
+  actual <- factor(actual, levels = c("Survived", "Died"))
+  predicted_probs <- as.numeric(predicted_probs)
+  roc_curve <- roc(response = actual, predictor = predicted_probs, levels = c("Survived", "Died"))
   auc_value <- auc(roc_curve)
   return(round(auc_value, 4))
 }
@@ -283,8 +287,8 @@ svm_cm <- confusionMatrix(svm_pred, test_data$DEATH_EVENT, positive = "Died")
 svm_f1 <- calculate_f1(svm_cm)
 print(svm_cm)
 cat("\nF1: ", svm_f1, "\n")
-svm_probs <- predict(lda_model, newdata = test_data, type = "prob")
-auc_value <- calculate_auc(test_data$DEATH_EVENT, lda_probs$Died) #Calculating AUC
+svm_probs <- predict(svm_model, newdata = test_data, type = "prob")
+auc_value <- calculate_auc(test_data$DEATH_EVENT, svm_probs$Died)  #Calculating AUC
 cat("AUC:", auc_value, "\n\n\n")
 
 
@@ -305,11 +309,10 @@ dt_cm <- confusionMatrix(dt_pred, test_data$DEATH_EVENT, positive = "Died")
 dt_f1 <- calculate_f1(dt_cm)
 print(dt_cm)
 cat("\nF1: ", dt_f1, "\n")
-dt_probs <- predict(lda_model, newdata = test_data, type = "prob")
+dt_probs <- predict(dt_model, newdata = test_data, type = "prob")
 auc_value <- calculate_auc(test_data$DEATH_EVENT, dt_probs$Died) #Calculating AUC
 cat("AUC:", auc_value, "\n\n\n")
 ```
-
 
 Plotting the F1, Accuracy, and AUC(ROC). We are extracting the F1 values and Accuracy values that we calculated in the chunk above.
 ```{r}
@@ -348,11 +351,235 @@ f1_results <- data.frame(Model = c("Logistic Regression", "LDA", "QDA", "KNN", "
                          F1_Score = c(logreg_f1, lda_f1, qda_f1, knn_f1, svm_f1, rf_f1, dt_f1))
 # boxplot(F1_Score ~ Model, data = f1_results, col = "lightblue",
 #         main = "F1 Score Comparison of Models", ylab = "F1 Score")
-barplot(accuracy_df$Accuracy, names.arg = accuracy_df$Model, col = "orange",
-        main = "Accuracy Comparison of Models", ylab = "Accuracy")
 
 
 # Boxplot for AUC (ROC)
 bwplot(results, metric = "ROC")
 ```
+ROC AUC
+```{r}
+# function to extract ROC curve data
+extract_roc_df <- function(roc_obj, model_name) {
+  data.frame(
+    FPR = 1 - roc_obj$specificities,
+    TPR = roc_obj$sensitivities,
+    Model = model_name
+  )
+}
+
+true_labels <- test_data$DEATH_EVENT
+
+# calculate ROC curves and AUCs
+roc_logreg <- roc(true_labels, logreg_probs$Died)
+roc_knn    <- roc(true_labels, knn_probs$Died)
+roc_svm    <- roc(true_labels, svm_probs$Died)
+roc_rf     <- roc(true_labels, rf_probs$Died)
+
+# get AUC values
+auc_logreg <- round(auc(roc_logreg), 3)
+auc_knn    <- round(auc(roc_knn), 3)
+auc_svm    <- round(auc(roc_svm), 3)
+auc_rf     <- round(auc(roc_rf), 3)
+
+# combine data
+# Create one long dataframe for ggplot
+roc_data <- rbind(
+  extract_roc_df(roc_logreg, paste0("Logistic (AUC = ", auc_logreg, ")")),
+  extract_roc_df(roc_knn, paste0("KNN (AUC = ", auc_knn, ")")),
+  extract_roc_df(roc_svm, paste0("SVM (AUC = ", auc_svm, ")")),
+  extract_roc_df(roc_rf, paste0("Random Forest (AUC = ", auc_rf, ")"))
+)
+
+
+# plot
+ggplot(roc_data, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(size = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+  labs(title = "ROC Curves for All Models",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 11)
+  )
+
+
+```
+AUC shows probability that random positive class instance (Died) is ranked higher than random negative class (Survived) in predicted probability. It is more informative when class dist. imbalanced (ex. hfp_data 68/32) compared to accuracy and F1 score since tehy are threshold-independent and not affected by skewed data.
+
+- rf performs the best, and the top-left curve indicates a high sensitive and low false positive rate
+- logreg and svm perform strongly
+- knn is least effective out of the 4, might be bc of noise, high variance, "curse of dimensionality" 
+
+PR Curve
+
+
+```{r}
+library(PRROC)
+library(ggplot2)
+
+# extract PR curve as data frame
+extract_pr_df <- function(pr_obj, model_name) {
+  data.frame(
+    Recall = pr_obj$curve[, 1],
+    Precision = pr_obj$curve[, 2],
+    Model = model_name
+  )
+}
+
+# auc
+auc_logreg <- round(pr_logreg$auc.integral, 3)
+auc_knn    <- round(pr_knn$auc.integral, 3)
+auc_svm    <- round(pr_svm$auc.integral, 3)
+auc_rf     <- round(pr_rf$auc.integral, 3)
+
+# combine to one df for ggplot
+pr_data <- rbind(
+  extract_pr_df(pr_logreg, paste0("Logistic (AUC = ", auc_logreg, ")")),
+  extract_pr_df(pr_knn, paste0("KNN (AUC = ", auc_knn, ")")),
+  extract_pr_df(pr_svm, paste0("SVM (AUC = ", auc_svm, ")")),
+  extract_pr_df(pr_rf, paste0("Random Forest (AUC = ", auc_rf, ")"))
+)
+
+# plot
+ggplot(pr_data, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 0.6) +
+  labs(title = "Precision-Recall Curves for All Models",
+       x = "Recall (Sensitivity)",
+       y = "Precision",
+       color = "Model") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 11)
+  )
+
+```
+PR curve focues on positive class ("Died") by plotting precision vs. recall. More informative than ROC AUC when class dist. is implanaed, since it directly evaluates model ability to ID true positives.
+
+- rf has higesht auc-pr (0.912) which shows its ability to identify actual deaths while also keeping high precision.
+- logreg had strong performance
+- svm more moderate
+- knn performed least well, showing it had more false positives and less effective in ID actual deaths.
+
+Hyperparm Tuning
+KNN
+```{r}
+knn_grid <- expand.grid(k = seq(3, 21, 2))
+knn_model <- train(DEATH_EVENT ~ ., data = train_data, method = "knn",
+                   trControl = train_control, metric = "ROC",
+                   tuneGrid = knn_grid)
+print(knn_model)
+
+```
+SVM
+```{r}
+svm_grid <- expand.grid(C = 2^(-2:2), sigma = 2^(-2:2))
+svm_model <- train(DEATH_EVENT ~ ., data = train_data, method = "svmRadial",
+                   trControl = train_control, metric = "ROC",
+                   preProcess = c("center", "scale"),
+                   tuneGrid = svm_grid)
+print(svm_model)
+
+```
+RF
+```{r}
+rf_grid <- expand.grid(mtry = 2:6)
+rf_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rf",
+                  trControl = train_control, metric = "ROC",
+                  tuneGrid = rf_grid)
+print(rf_model)
+
+```
+DT
+```{r}
+dt_grid <- expand.grid(cp = seq(0.001, 0.1, by = 0.005))
+dt_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rpart",
+                  trControl = train_control, metric = "ROC",
+                  tuneGrid = dt_grid)
+print(dt_model)
+
+```
+For each model trained, we performed grid search w/ caret::train() and 10-fold CV to optimize k, C/sigma, mtry, cp. ROC was used to select optimal model using largest value.
+
+Principal Component Analysis
+to reduce dimensionality so we can plot/interpret better (low-dimensional representation of the data that captures as much variance as possible)
+```{r}
+library(ggbiplot)
+library(factoextra)
+
+# extract only scaled continuous predictors
+pca_data <- hfp_scaled[, continuous_vars]
+
+pca_result <- prcomp(pca_data, center = FALSE, scale. = FALSE)
+
+# scree plot -> proportion of variance explained
+screeplot(pca_result, type = "lines", main = "Scree Plot of Principal Components")
+
+# biplot (ISLR 10.1)
+fviz_pca_biplot(pca_result,
+                label = "var",                    
+                habillage = hfp_scaled$DEATH_EVENT,
+                addEllipses = TRUE,             
+                col.var = "black",              
+                col.ind = "gray",               
+                pointsize = 1,                  
+                repel = TRUE,                  
+                labelsize = 2,                 
+                title = "PCA Biplot: Heart Failure Patients") 
+
+
+# PCA dataframe
+pca_df <- as.data.frame(pca_result$x)
+pca_df$DEATH_EVENT <- hfp_scaled$DEATH_EVENT         
+
+# PC1 vs. PC2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = DEATH_EVENT)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "PCA: PC1 vs. PC2", x = "PC1", y = "PC2", color = "Death Event") +
+  theme_minimal()
+
+
+
+```
+scree plot: shows amt of variance explained by each PC, each point represents 1 PC and y-axis shows how much variance PC explains. We used it to determine how many PCs show meaningful dimensionality reduction
+- PC1 and PC2 explain most variance.
+
+pca biplot: visualizes both PC for each patient and variable loadings (direction-how variable contr. to PCs, length-how strongly var influences PCA, angle- same dir=pos, opp dir=neg, perp=uncorr) to visualize see the clutering between survived (0) and died (1)
+- we can see that variables like `serum_creatine` and `age` arrows are long and point right, therfore they strongly contribute to PC1.
+- `ejection_fraction` and `serum_sodium` point towards the top-left sector of the plot, and it has some positive loading on PC2, but negative on PC1.
+- `time` points down left, meaning it loads negatively on PC1 and PC2.
+- `creatine_phosphokinase` points down, and it contributes mostly neg. to PC2
+- `platlets` points left -> negative PC1 loading
+
+pca scatter plot:
+shows how individual points lie in PCA space
+- shows spatial grouping of `DEATH_EVENT` classes, but not perfectly seperable, shows that PCA doesnt fully seperate classes but shows patterns
+
+K-means
+ID groups in PCA reduced space
+```{r}
+set.seed(2025)
+
+# top 2 PCs for visualization, full data for clustering
+kmeans_result <- kmeans(pca_data, centers = 2, nstart = 25)
+
+# cluster labels to PCA df
+pca_df$Cluster <- as.factor(kmeans_result$cluster)
+
+# confusion matrix to check alignment with DEATH_EVENT
+table(Cluster = pca_df$Cluster, DEATH_EVENT = pca_df$DEATH_EVENT)
+
+# plot clusters
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "K-Means Clustering (k = 2) on PCA Components") +
+  theme_minimal()
+
+```
+We used k-means (k=2) on first 2 PC to see the unsupervised grouping of patients. Compared to the other scatter plot above which used `DEATH_EVENT`, k-means formed the groups based only on patterns in the data and no knowledge of survival outcomes. 
+The plot shows 2 distinct clusters, which indicates the dataset has a natural structure, and the patients are grouped based on similar features (ex. `age`, `serum_creatine`, etc) which had a strong impact on patterns found by PCA (plots above). 
 
