@@ -529,7 +529,7 @@ fviz_pca_biplot(pca_result,
                 pointsize = 1,                  
                 repel = TRUE,                  
                 labelsize = 2,                 
-                title = "PCA Biplot: Heart Failure Patients") 
+                title = "Principal Component Analysis Biplot: Heart Failure Patients") 
 
 
 # PCA dataframe
@@ -539,7 +539,7 @@ pca_df$DEATH_EVENT <- hfp_scaled$DEATH_EVENT
 # PC1 vs. PC2
 ggplot(pca_df, aes(x = PC1, y = PC2, color = DEATH_EVENT)) +
   geom_point(alpha = 0.6) +
-  labs(title = "PCA: PC1 vs. PC2", x = "PC1", y = "PC2", color = "Death Event") +
+  labs(title = "Principal Component Analysis: PC1 vs. PC2", x = "PC1", y = "PC2", color = "Death Event") +
   theme_minimal()
 
 
