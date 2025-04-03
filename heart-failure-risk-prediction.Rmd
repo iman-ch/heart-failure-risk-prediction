@@ -1,64 +1,137 @@
 ---
 title: "Heart Failure Prediction"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
+editor_options:
+  markdown:
+    wrap: 72
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE)
+```
+
+### Load Packages and Data
 
 ```{r}
 library(pROC)
 library(caret)
-
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(corrplot)
+library(PRROC)
+library(ggbiplot)
+library(factoextra)
+library(rpart.plot)
 
 # load data
 hfp_data <- read.csv("data/heart_failure_clinical_records_dataset.csv")
+```
 
+### 1. Explore Dataset
 
+```{r}
 # read structure/summary
 str(hfp_data)
 summary(hfp_data)
 head(hfp_data)
-```
 
-```{r}
 # check missing values
 colSums(is.na(hfp_data))
 
 # distribution
 table(hfp_data$DEATH_EVENT)
 prop.table(table(hfp_data$DEATH_EVENT))
+```
+
+```{r}
 
 ```
+
 203 (67.8%) of patients survived, while 96 (32.1%) died.
 
-Which variables are related to whether a patient died from heart failure (response variable (`DEATH_EVENT`)?
+Which variables are related to whether a patient died from heart failure
+(response variable (`DEATH_EVENT`)?
 
-`age`
+### 2. Exploratory Data Analysis
 
-```{r}
-library(ggplot2)
+#### 2. 1 Correlation Matrix
 
-ggplot(hfp_data, aes(x = age, fill = factor(DEATH_EVENT))) +
-  geom_density(alpha = 0.4, color = NA) +
-  labs(title = "Age Density by Death Event", fill = "Death Event") +
-  scale_fill_discrete(name = "Death Event", labels = c("0 (Survived)", "1 (Died)")) +
-  scale_x_continuous(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0))
+```{r, fig.width=8, fig.height=6}
+# correlation matrix
+cor_matrix_y <- cor(hfp_data)
+cor_matrix_y
 
+# top predictors most correlated with DEATH_EVENT
+cor_target <- cor_matrix_y["DEATH_EVENT", ]
+top_5 <- sort(abs(cor_target[names(cor_target) != "DEATH_EVENT"]), decreasing = TRUE)[1:5]
+top_5
 
+# heatmap
+corrplot(cor_matrix_y,
+         method = "color",       
+         type = "upper",         # upper triangle
+         order = "hclust",       # group similar variables
+         addCoef.col = "black",  # show correlation values
+         tl.cex = 0.7,           # axis text
+         number.cex = 0.6,       # correlation values
+         tl.col = "black",       # axis label color
+         cl.cex = 0.6,           # color legend text size
+         mar = c(1, 1, 2.5, 1))  # plot margins
+
+title("Correlation Matrix of Variables in Heart Failure Dataset", cex.main = 0.75)
 ```
-This plot shows the estimated probability density per age. This reveals that `age` might be a significant predictor. More of the patients who died (Class 1), were older than the ones who survived (Class 0) . Although there is an overlap in the classes, the distribution suggests that increasing age is associated with a higher risk of death among heart failure patients.
 
-`ejection_fraction`
+From this matrix, we can see that the top 5 predictors most correlated
+with `DEATH_EVENT` are `time`, `serum_creatinine`, `ejection_fraction`,
+`age`, and `serum_sodium`.
+
+#### 2.2 Boxplots of Continuous Features
+
+To observe visual differences, we explored all continuous variables
+grouped by `DEATH_EVENT`.
+
+```{r, fig.width=10, fig.heigh=6}
+# ID binary vars and derive continuous ones
+binary_vars <- c("sex", "diabetes", "high_blood_pressure", "smoking", "anaemia")
+continuous_vars <- setdiff(names(hfp_data), c(binary_vars, "DEATH_EVENT"))
+
+# include all continuous vars + DEATH_EVENT
+box_vars <- hfp_data[, c(continuous_vars, "DEATH_EVENT")]
+
+# pivot longer for faceted plotting
+long_box <- pivot_longer(box_vars, 
+                         cols = -DEATH_EVENT, 
+                         names_to = "Variable", 
+                         values_to = "Value")
+
+# plot
+ggplot(long_box, aes(x = factor(DEATH_EVENT), y = Value, fill = factor(DEATH_EVENT))) +
+  geom_boxplot(alpha = 0.6, outlier.color = "red", outlier.alpha = 0.3) +
+  facet_wrap(~ Variable, scales = "free", ncol = 3) +
+  labs(title = "Boxplots of All Continuous Variables by Death Event",
+       x = "Death Event", y = "Value", fill = "Death Event") +
+  scale_fill_manual(values = c("0" = "pink", "1" = "turquoise"),
+                    labels = c("0 (Survived)", "1 (Died)")) +
+  theme_minimal()
+```
+
+These boxplots align with the top predictors seen in the correlation
+matrix above.
+
+#### 2.3 Violin Plots for Top Predictors
+
+Based on the correlation and boxplots, we've selected the top 5 features
+to explore more deeply.
 
 ```{r}
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-
-# Violin plots for top 3 predictors
-top_vars <- c("ejection_fraction", "serum_creatinine", "time")
+top_vars <- c("time", "serum_creatinine", "ejection_fraction", "age", "serum_sodium")
 
 for (var in top_vars) {
   p <- ggplot(hfp_data, aes(x = factor(DEATH_EVENT), y = .data[[var]], fill = factor(DEATH_EVENT))) +
@@ -70,61 +143,64 @@ for (var in top_vars) {
     theme_minimal()
   print(p)
 }
-
-
 ```
+
+Each of these plots shows the value comparision of partients who
+survived (`DEATH_EVENT`=0), and died (`DEATH_EVENT`=1)
+
+-   `time`: patients who survived had a longer time where they followed
+    up compared to those who died.
+
+-   `serum_creatnine`: shows more right-skewed distributions for
+    patients who died, which shows that they had higher levels of serum
+    creatnine, an indicator of poor kidney function.
+
+-   `ejection_fraction`: there was more instances of lower ejection
+    fraction (how much blood the heart pumps out each heartbeat) in
+    patients who died.
+
+-   `age`: the died group skews older, confirming that age is a risk
+    factor, but still there is some overlap so it shouldn't be used as a
+    sole predictor.
+
+-   `serum_sodium`: the distributions are a bit similar, with slightly
+    lower sodium levels in patients who died. Since they are so similar,
+    this variable might be weakly predictive.
+
+#### 2.4 Density Plot for Age
+
+We wanted to explore how the top correlated variable (`time`) is
+distributed across the response group.
+
 ```{r}
-library(tidyr)
-library(dplyr)
-library(ggplot2)
-
-box_vars <- dplyr::select(hfp_data,
-  age, platelets, serum_sodium, creatinine_phosphokinase, DEATH_EVENT
-)
-
-# Pivot to long format for facetting
-long_box <- pivot_longer(box_vars, 
-                         cols = -DEATH_EVENT, 
-                         names_to = "Variable", 
-                         values_to = "Value")
-
-# Faceted boxplots
-ggplot(long_box, aes(x = factor(DEATH_EVENT), y = Value, fill = factor(DEATH_EVENT))) +
-  geom_boxplot(alpha = 0.6, outlier.color = "red", outlier.alpha = 0.3) +
-  facet_wrap(~ Variable, scales = "free", ncol = 2) +
-  labs(title = "Boxplots of Additional Continuous Variables by Death Event",
-       x = "Death Event", y = "Value", fill = "Death Event") +
+ggplot(hfp_data, aes(x = time, fill = factor(DEATH_EVENT))) +
+  geom_density(alpha = 0.4, color = NA) +
+  labs(
+    title = "Time (Follow up Duration) Density by Death Event",
+    x = "Time (days)",
+    y = "Density",
+    fill = "Death Event"
+  ) +
   scale_fill_manual(values = c("0" = "pink", "1" = "turquoise"),
                     labels = c("0 (Survived)", "1 (Died)")) +
   theme_minimal()
 
-```
-
-```{r}
-library(corrplot)
-library(dplyr)
-
-# predictors and response
-cor_matrix_y <- cor(hfp_data)
-cor_matrix_y
-
-corrplot(cor_matrix_y,
-         method = "color",       
-         type = "upper",         # show only upper triangle
-         order = "hclust",       # group similar variables
-         addCoef.col = "black",  # show correlation values
-         tl.cex = 0.5,           # shrink axis text
-         number.cex = 0.4,       # shrink correlation values
-         tl.col = "black",       # axis label color
-         cl.cex = 0.5,           # color legend text size
-         mar = c(1, 1, 2.5, 1))    # adjust plot margins
-
-title("Correlation Matrix of Variables in Heart Failure Dataset", cex.main = 0.75)
 
 ```
-  
-PREPROCESSING
-scaling predictors
+
+This plot shows the estimated probability density of follow up-time (in
+days). The blue curve (deaths) is heavily concentrated at lower times
+(\<50 days), and suggests that patients who died had shorter follow up
+durations. The pink curve shows a "bimodal" distribution (two peaks at
+\~75 and 200), and indicates a wider range and longer time duration
+among surviving patients. This feature may contribute more significantly
+to class seperation and therefore reduce error training rate in models
+like LDA or Logistic Regression.
+
+### 3. Preprocessing
+
+#### 3.1 Scaling Predictors
+
 ```{r}
 binary_vars <- c("sex", "diabetes", "high_blood_pressure", "smoking", "anaemia")
 continuous_vars <- setdiff(names(hfp_data), c(binary_vars, "DEATH_EVENT"))
@@ -137,33 +213,56 @@ hfp_scaled <- cbind(as.data.frame(scaled_cont), binary_data, DEATH_EVENT = hfp_d
 head(hfp_scaled)
 ```
 
-continuous features were standardized using z-score scaling (mean = 0, sd = 1). this makes sure that the features have equal weight in distance-based methods. the binary features were kept the same to keep their categorical interpretation.
+All continuous features were standardized using z-score scaling (mean =
+0, sd = 1). This makes sure that the features have equal weight in
+distance-based methods. The binary features were kept the same to keep
+their categorical interpretation.
 
-train/test split
+#### 3.2 Train-Test Split
+
 ```{r}
-library(caret)
-
 hfp_data$DEATH_EVENT <- factor(hfp_data$DEATH_EVENT, levels = c(0, 1), labels = c("Survived", "Died"))
 
 set.seed(2025)
 
-# createDataPartition keeps class data distribution consistent, so same amount of casualties (DEATH_EVENT) set at 1 for training and test
 train_index <- createDataPartition(hfp_scaled$DEATH_EVENT, p = 0.7, list = FALSE)
 train_data <- hfp_scaled[train_index, ]
-```
-
-
-```{r}
 test_data <- hfp_scaled[-train_index, ]
 ```
 
-K-fold cross validation
+The dataset was split 70/30 using stratified sampling, which makes sure
+that the data distribution is consistent, keeping the same amount of
+instances where patients have died for the training and test set.
+
+#### 3.3 K-Fold Cross Validation
+
 ```{r}
 train_control <- trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary, savePredictions = TRUE)
 ```
 
+10-fold cross validation was set up for all models.
 
-Modelling with knn, lda, qda, random forest, decision tree, and svm. Because of having binary values we are performing a conversion in the beginning to designate values for deaths and alive individuals.
+### 4. Model Training
+
+We trained the following classifiers:
+
+-   Quadratic Discriminant Analysis (QDA)
+
+-   Linear Discriminant Analysis (LDA)
+
+-   Logistic Regression (LogReg)
+
+-   k-Nearest Neighbors (KNN)
+
+-   Support Vector Machine (SVM)
+
+-   Random Forest (RF)
+
+-   Decision Tree (DT)
+
+Since there are binary values, we performed a conversion in the
+beginning to designate values for patients who died and survived.
+
 ```{r}
 #Classfication Models
 # Convert DEATH_EVENT to a factor for classification since it is numeric (meant for regression)
@@ -178,38 +277,40 @@ set.seed(2025)
 qda_model <- train(DEATH_EVENT ~ ., data = train_data, method = "qda", trControl = train_control, metric = "ROC")
 print(qda_model)
 
-#LDA Model
+# LDA Model
 lda_model <- train(DEATH_EVENT ~ ., data = train_data, method = "lda", trControl = train_control, metric = "ROC")
 print(lda_model)
 
-#Logistic Regression
+# Logistic Regression
 logistic_regression_model <- train(DEATH_EVENT ~ ., data = train_data, method = "glm", family = "binomial", trControl = train_control, metric = "ROC")
 print (logistic_regression_model)
 
-#KNN
+# KNN
 knn_model <- train(DEATH_EVENT ~ ., data = train_data, method = "knn", trControl = train_control, metric = "ROC")
 print (knn_model)
 
-#SVM
+# SVM
 svm_model <- train(DEATH_EVENT ~ ., data = train_data, method = "svmRadial", trControl = train_control, preProcess = c("center", "scale"), metric = "ROC") 
 print(svm_model)
 
-#Random Forest
+# Random Forest
 rf_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rf", trControl = train_control, metric = "ROC")
 print(rf_model)
 
-#Decision Tree
+# Decision Tree
 dt_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rpart", trControl = train_control, metric = "ROC")
 print(dt_model)
 
-library(rpart.plot)
 rpart.plot(dt_model$finalModel, main = "Decision Tree for Heart Failure Prediction")
 dt_pred <- predict(dt_model, newdata = test_data)
 confusionMatrix(dt_pred, test_data$DEATH_EVENT)
 
 ```
 
-Manually calculating F1
+### 5. Model Evaluation: F1 and AUC
+
+#### 5.1 Utility Functions
+
 ```{r}
 # Function to calculate F1 from confusion matrix
 calculate_f1 <- function(cm) {
@@ -233,7 +334,11 @@ calculate_auc <- function(actual, predicted_probs, positive_label = "Died") {
 }
 ```
 
-Generating Confusion Matrices for each of the models, along with manually calculating F1 and AUC 
+#### 5.2 Metrics per Model
+
+We generated confusion matrices for each of the models, along with
+manually calculating F1-score and AUC.
+
 ```{r}
 
 # Logistic Regression
@@ -314,18 +419,39 @@ auc_value <- calculate_auc(test_data$DEATH_EVENT, dt_probs$Died) #Calculating AU
 cat("AUC:", auc_value, "\n\n\n")
 ```
 
-Plotting the F1, Accuracy, and AUC(ROC). We are extracting the F1 values and Accuracy values that we calculated in the chunk above.
-```{r}
-#Comparing Models
-results <- resamples(list(SVM = svm_model, LogReg = logistic_regression_model, LDA = lda_model, 
-                          QDA = qda_model, RF = rf_model, KNN = knn_model))
+#### 5.3 Variable Importance for Random Forest
 
-# Summary of model comparisons
+```{r}
+# variable importance for rf
+library(caret)
+importance_rf <- varImp(rf_model)
+print(importance_rf)
+
+# top 10 important variables
+plot(importance_rf, top = 10, main = "Top 10 Important Variables - Random Forest")
+```
+
+varImp() IDs which predictors had the biggest impact on model
+performance. In RF, var. importance is calculated based on how much each
+variable reduces impurity across all trees. The top variables are
+`time`, `serum_creatine`, `ejection_fraction`, and `age`, which aligns
+with domain knowledge-\> indicators of heart failure progression.
+
+### 6. Performance Comparision
+
+#### 6.1 Summary
+
+```{r}
+results <- resamples(list(SVM = svm_model, LogReg = logistic_regression_model, LDA = lda_model, QDA = qda_model, RF = rf_model, KNN = knn_model))
 summary(results)
 
+```
 
+#### 6.2 Comparison Plots (Barplot and Boxplot of Model Performace)
+
+```{r}
 # Boxplot for Accuracy
-##bwplot(results, metric = "Accuracy")
+## bwplot(results, metric = "Accuracy")
 get_accuracy <- function(cm) {
   accuracy <- as.numeric(cm$overall["Accuracy"])
   return(round(accuracy, 4))
@@ -341,10 +467,10 @@ dt_acc <- get_accuracy(dt_cm)
 
 accuracy_df <- data.frame(Model = c("LogReg", "LDA", "QDA", "KNN", "SVM","RF", "DT"),
                           Accuracy = c(logreg_acc, lda_acc, qda_acc, knn_acc, svm_acc, rf_acc, dt_acc))
+
 # Bar plot for accuracy - used this instead of boxplot because the accuracy were singe points so boxplot was a line rather than box
 barplot(accuracy_df$Accuracy, names.arg = accuracy_df$Model, col = "darkgreen",
         main = "Accuracy Comparison of Models", ylab = "Accuracy")
-
 
 # Boxplot for F1 Score 
 f1_results <- data.frame(Model = c("Logistic Regression", "LDA", "QDA", "KNN", "SVM", "Random Forest", "Decision Tree"),
@@ -356,7 +482,9 @@ f1_results <- data.frame(Model = c("Logistic Regression", "LDA", "QDA", "KNN", "
 # Boxplot for AUC (ROC)
 bwplot(results, metric = "ROC")
 ```
-ROC AUC
+
+#### 6.3 ROC Curve
+
 ```{r}
 # function to extract ROC curve data
 extract_roc_df <- function(roc_obj, model_name) {
@@ -382,7 +510,6 @@ auc_svm    <- round(auc(roc_svm), 3)
 auc_rf     <- round(auc(roc_rf), 3)
 
 # combine data
-# Create one long dataframe for ggplot
 roc_data <- rbind(
   extract_roc_df(roc_logreg, paste0("Logistic (AUC = ", auc_logreg, ")")),
   extract_roc_df(roc_knn, paste0("KNN (AUC = ", auc_knn, ")")),
@@ -407,18 +534,40 @@ ggplot(roc_data, aes(x = FPR, y = TPR, color = Model)) +
 
 
 ```
-AUC shows probability that random positive class instance (Died) is ranked higher than random negative class (Survived) in predicted probability. It is more informative when class dist. imbalanced (ex. hfp_data 68/32) compared to accuracy and F1 score since tehy are threshold-independent and not affected by skewed data.
 
-- rf performs the best, and the top-left curve indicates a high sensitive and low false positive rate
-- logreg and svm perform strongly
-- knn is least effective out of the 4, might be bc of noise, high variance, "curse of dimensionality" 
+AUC shows probability that random positive class instance (Died) is
+ranked higher than random negative class (Survived) in predicted
+probability. It is more informative when class distribution is
+imbalanced (ex. `hfp_data` 68/32) in comparison to accuracy and F1-score
+since they are threshold-independent and not affected by skewed data.
 
-PR Curve
+-   **Random Forest** performs the best (AUC=0.952), and the top-left
+    curve indicates a high sensitive and low false positive rate
+-   **Logistic Regression** and **Support Vector Machine** perform
+    strongly (AUC=0.903, 0.886 respectively)
+-   **K-Nearest Neighbour** is least effective out of the 4 (AUC=0.814).
+    This might be because of noise, high variance, "curse of
+    dimensionality".
 
+#### 6.4 PR Curves
 
 ```{r}
-library(PRROC)
-library(ggplot2)
+# PR curves
+pr_logreg <- pr.curve(scores.class0 = logreg_probs$Died[true_labels == "Died"],
+                      scores.class1 = logreg_probs$Died[true_labels == "Survived"],
+                      curve = TRUE)
+
+pr_knn <- pr.curve(scores.class0 = knn_probs$Died[true_labels == "Died"],
+                   scores.class1 = knn_probs$Died[true_labels == "Survived"],
+                   curve = TRUE)
+
+pr_svm <- pr.curve(scores.class0 = svm_probs$Died[true_labels == "Died"],
+                   scores.class1 = svm_probs$Died[true_labels == "Survived"],
+                   curve = TRUE)
+
+pr_rf <- pr.curve(scores.class0 = rf_probs$Died[true_labels == "Died"],
+                  scores.class1 = rf_probs$Died[true_labels == "Survived"],
+                  curve = TRUE)
 
 # extract PR curve as data frame
 extract_pr_df <- function(pr_obj, model_name) {
@@ -429,18 +578,18 @@ extract_pr_df <- function(pr_obj, model_name) {
   )
 }
 
-# auc
-auc_logreg <- round(pr_logreg$auc.integral, 3)
-auc_knn    <- round(pr_knn$auc.integral, 3)
-auc_svm    <- round(pr_svm$auc.integral, 3)
-auc_rf     <- round(pr_rf$auc.integral, 3)
+# PR AUCs
+auc_pr_logreg <- round(pr_logreg$auc.integral, 3)
+auc_pr_knn    <- round(pr_knn$auc.integral, 3)
+auc_pr_svm    <- round(pr_svm$auc.integral, 3)
+auc_pr_rf     <- round(pr_rf$auc.integral, 3)
 
 # combine to one df for ggplot
 pr_data <- rbind(
-  extract_pr_df(pr_logreg, paste0("Logistic (AUC = ", auc_logreg, ")")),
-  extract_pr_df(pr_knn, paste0("KNN (AUC = ", auc_knn, ")")),
-  extract_pr_df(pr_svm, paste0("SVM (AUC = ", auc_svm, ")")),
-  extract_pr_df(pr_rf, paste0("Random Forest (AUC = ", auc_rf, ")"))
+  extract_pr_df(pr_logreg, paste0("Logistic (PR AUC = ", auc_pr_logreg, ")")),
+  extract_pr_df(pr_knn, paste0("KNN (PR AUC = ", auc_pr_knn, ")")),
+  extract_pr_df(pr_svm, paste0("SVM (PR AUC = ", auc_pr_svm, ")")),
+  extract_pr_df(pr_rf, paste0("Random Forest (PR AUC = ", auc_pr_rf, ")"))
 )
 
 # plot
@@ -458,15 +607,23 @@ ggplot(pr_data, aes(x = Recall, y = Precision, color = Model)) +
   )
 
 ```
-PR curve focues on positive class ("Died") by plotting precision vs. recall. More informative than ROC AUC when class dist. is implanaed, since it directly evaluates model ability to ID true positives.
 
-- rf has higesht auc-pr (0.912) which shows its ability to identify actual deaths while also keeping high precision.
-- logreg had strong performance
-- svm more moderate
-- knn performed least well, showing it had more false positives and less effective in ID actual deaths.
+PR curve focuses on positive class ("Died") by plotting precision vs.
+recall. More informative than ROC AUC when class distribution is
+imbalanced, since it directly evaluates model ability to identify true
+positives.
 
-Hyperparm Tuning
-KNN
+-   **Random Forest** has highest AUC-PR (0.912) which shows its ability
+    to identify actual deaths while also keeping high precision.
+-   **Logistic Regression** had strong performance at 0.849
+-   **Support Vector Machine** gives a moderate performance at 0.8
+-   **K-Nearest Neighbour** performed least well, at 0.746, showing it
+    had more false positives and less effective in ID actual deaths.
+
+### 7. Hyperparameter Tuning
+
+#### 7.1 K-Nearest Neighbours (KNN)
+
 ```{r}
 knn_grid <- expand.grid(k = seq(3, 21, 2))
 knn_model <- train(DEATH_EVENT ~ ., data = train_data, method = "knn",
@@ -475,7 +632,9 @@ knn_model <- train(DEATH_EVENT ~ ., data = train_data, method = "knn",
 print(knn_model)
 
 ```
-SVM
+
+#### 7.2 Support Vector Machine (SVM)
+
 ```{r}
 svm_grid <- expand.grid(C = 2^(-2:2), sigma = 2^(-2:2))
 svm_model <- train(DEATH_EVENT ~ ., data = train_data, method = "svmRadial",
@@ -485,7 +644,9 @@ svm_model <- train(DEATH_EVENT ~ ., data = train_data, method = "svmRadial",
 print(svm_model)
 
 ```
-RF
+
+#### 7.3 Random Forest (RF)
+
 ```{r}
 rf_grid <- expand.grid(mtry = 2:6)
 rf_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rf",
@@ -494,7 +655,9 @@ rf_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rf",
 print(rf_model)
 
 ```
-DT
+
+#### 7.4 Decision Tree (DT)
+
 ```{r}
 dt_grid <- expand.grid(cp = seq(0.001, 0.1, by = 0.005))
 dt_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rpart",
@@ -503,23 +666,46 @@ dt_model <- train(DEATH_EVENT ~ ., data = train_data, method = "rpart",
 print(dt_model)
 
 ```
-For each model trained, we performed grid search w/ caret::train() and 10-fold CV to optimize k, C/sigma, mtry, cp. ROC was used to select optimal model using largest value.
 
-Principal Component Analysis
-to reduce dimensionality so we can plot/interpret better (low-dimensional representation of the data that captures as much variance as possible)
+For each model trained, we performed grid search and 10-fold cross
+validation to optimize `k`, `c`/`sigma`, `mtry`, and `cp` for their
+respective models. ROC was used to select optimal model using largest
+value.
+
+### 8. Principal Component Analysis (PCA)
+
+We applied PCA to reduce dimensionality so we can plot and interpret
+better, as PCA will give us a low-dimensional representation of the data
+that captures as much variance as possible.
+
 ```{r}
-library(ggbiplot)
-library(factoextra)
-
 # extract only scaled continuous predictors
 pca_data <- hfp_scaled[, continuous_vars]
-
 pca_result <- prcomp(pca_data, center = FALSE, scale. = FALSE)
+```
 
+#### 8.1 Scree Plot
+
+This plot shows how much variance is explained by each principal
+component.
+
+```{r}
 # scree plot -> proportion of variance explained
 screeplot(pca_result, type = "lines", main = "Scree Plot of Principal Components")
+```
 
-# biplot (ISLR 10.1)
+scree plot: shows amt of variance explained by each PC, each point
+represents 1 PC and y-axis shows how much variance PC explains. We used
+it to determine how many PCs show meaningful dimensionality reduction -
+PC1 and PC2 explain most variance.
+
+#### 8.2 PCA Biplot
+
+This plot shows patient scores on the first two PCs and the loadings of
+each variable.
+
+```{r}
+# biplot
 fviz_pca_biplot(pca_result,
                 label = "var",                    
                 habillage = hfp_scaled$DEATH_EVENT,
@@ -530,8 +716,49 @@ fviz_pca_biplot(pca_result,
                 repel = TRUE,                  
                 labelsize = 2,                 
                 title = "Principal Component Analysis Biplot: Heart Failure Patients") 
+```
 
+This biplot visualizes both PCs (Dim1, Dim2) for each patient, and
+variable loadings. A positive loading shows that the variable increases
+the PC score, and a negative loading shows that the variable decreases
+the PC score. Each arrow represents a variable and coneys:
 
+-   direction: how variable contributes to PCs
+
+-   length: how strongly a variable influences PCA (longer=stronger)
+
+-   angle between arrows:
+
+    -   same direction = **positive correlation** between variables
+
+    -   opposite direction = **negative correlation** between variables
+
+    -   perpendicular = uncorrelated
+
+This helps us visually see the clutering between survived (0) and died
+(1).
+
+We can see that variables like `serum_creatine` and `age` arrows are
+**long and point right**, therfore they strongly contribute to PC1.
+
+`ejection_fraction` and `serum_sodium` point towards the **upper-left**
+quadrant of the plot, and it has moderate positive loading on PC2, but
+negative on PC1.
+
+`time` points **bottom-left,** meaning it loads negatively on PC1 and
+PC2.
+
+`creatine_phosphokinase` points **downward**, and it contributes mostly
+negatively to PC2
+
+`platlets` points **left**, indicating a negative PC1 loading
+
+#### 8.3 PC1 vs. PC2 Scatterplot
+
+This plot visualizes patients in the PCA space, colored by survival
+outcome.
+
+```{r}
 # PCA dataframe
 pca_df <- as.data.frame(pca_result$x)
 pca_df$DEATH_EVENT <- hfp_scaled$DEATH_EVENT         
@@ -541,26 +768,18 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = DEATH_EVENT)) +
   geom_point(alpha = 0.6) +
   labs(title = "Principal Component Analysis: PC1 vs. PC2", x = "PC1", y = "PC2", color = "Death Event") +
   theme_minimal()
-
-
-
 ```
-scree plot: shows amt of variance explained by each PC, each point represents 1 PC and y-axis shows how much variance PC explains. We used it to determine how many PCs show meaningful dimensionality reduction
-- PC1 and PC2 explain most variance.
 
-pca biplot: visualizes both PC for each patient and variable loadings (direction-how variable contr. to PCs, length-how strongly var influences PCA, angle- same dir=pos, opp dir=neg, perp=uncorr) to visualize see the clutering between survived (0) and died (1)
-- we can see that variables like `serum_creatine` and `age` arrows are long and point right, therfore they strongly contribute to PC1.
-- `ejection_fraction` and `serum_sodium` point towards the top-left sector of the plot, and it has some positive loading on PC2, but negative on PC1.
-- `time` points down left, meaning it loads negatively on PC1 and PC2.
-- `creatine_phosphokinase` points down, and it contributes mostly neg. to PC2
-- `platlets` points left -> negative PC1 loading
+The scatterplot explores how individual points lie in PCA space. It
+shows the spatial grouping of `DEATH_EVENT` classes, but it is not
+perfectly seperable. It also shows that PCA doesn't fully separate
+classes but shows patterns instead.
 
-pca scatter plot:
-shows how individual points lie in PCA space
-- shows spatial grouping of `DEATH_EVENT` classes, but not perfectly seperable, shows that PCA doesnt fully seperate classes but shows patterns
+### 9. K-Means Clustering
 
-K-means
-ID groups in PCA reduced space
+We applied K-Means (k=2) to identify groups in PCA reduced space, this
+will explore **unsupervised** grouping.
+
 ```{r}
 set.seed(2025)
 
@@ -580,6 +799,12 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
   theme_minimal()
 
 ```
-We used k-means (k=2) on first 2 PC to see the unsupervised grouping of patients. Compared to the other scatter plot above which used `DEATH_EVENT`, k-means formed the groups based only on patterns in the data and no knowledge of survival outcomes. 
-The plot shows 2 distinct clusters, which indicates the dataset has a natural structure, and the patients are grouped based on similar features (ex. `age`, `serum_creatine`, etc) which had a strong impact on patterns found by PCA (plots above). 
 
+We used k-means (k=2) on first 2 PC to see the unsupervised grouping of
+patients. Compared to the other scatter plot above which used
+`DEATH_EVENT`, K-Means formed the groups based only on patterns in the
+data and no knowledge of survival outcomes. The plot shows two distinct
+clusters, which indicates the dataset has a natural structure, and the
+patients are grouped based on similar features (ex. `age`,
+`serum_creatine`, etc) which had a strong impact on patterns found by
+PCA (plots above).
