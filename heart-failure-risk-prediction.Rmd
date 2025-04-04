@@ -1,9 +1,14 @@
 ---
 title: "Heart Failure Prediction"
 output:
-  pdf_document: default
   html_document:
+    toc: yes
     df_print: paged
+  pdf_document:
+    fig_width: 6
+    fig_height: 4
+    toc: yes
+    number_sections: yes
 editor_options:
   markdown:
     wrap: 72
