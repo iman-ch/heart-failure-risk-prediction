@@ -55,10 +55,6 @@ table(hfp_data$DEATH_EVENT)
 prop.table(table(hfp_data$DEATH_EVENT))
 ```
 
-```{r}
-
-```
-
 203 (67.8%) of patients survived, while 96 (32.1%) died.
 
 Which variables are related to whether a patient died from heart failure
@@ -150,15 +146,15 @@ for (var in top_vars) {
 }
 ```
 
-Each of these plots shows the value comparision of partients who
-survived (`DEATH_EVENT`=0), and died (`DEATH_EVENT`=1)
+Each of these plots shows the value comparison of patients who survived
+(`DEATH_EVENT`=0), and died (`DEATH_EVENT`=1)
 
 -   `time`: patients who survived had a longer time where they followed
     up compared to those who died.
 
--   `serum_creatnine`: shows more right-skewed distributions for
+-   `serum_creatinine`: shows more right-skewed distributions for
     patients who died, which shows that they had higher levels of serum
-    creatnine, an indicator of poor kidney function.
+    creatinine, an indicator of poor kidney function.
 
 -   `ejection_fraction`: there was more instances of lower ejection
     fraction (how much blood the heart pumps out each heartbeat) in
@@ -199,7 +195,7 @@ days). The blue curve (deaths) is heavily concentrated at lower times
 durations. The pink curve shows a "bimodal" distribution (two peaks at
 \~75 and 200), and indicates a wider range and longer time duration
 among surviving patients. This feature may contribute more significantly
-to class seperation and therefore reduce error training rate in models
+to class separation and therefore reduce error training rate in models
 like LDA or Logistic Regression.
 
 ### 3. Preprocessing
@@ -439,10 +435,10 @@ plot(importance_rf, top = 10, main = "Top 10 Important Variables - Random Forest
 varImp() IDs which predictors had the biggest impact on model
 performance. In RF, var. importance is calculated based on how much each
 variable reduces impurity across all trees. The top variables are
-`time`, `serum_creatine`, `ejection_fraction`, and `age`, which aligns
+`time`, `serum_creatinine`, `ejection_fraction`, and `age`, which aligns
 with domain knowledge-\> indicators of heart failure progression.
 
-### 6. Performance Comparision
+### 6. Performance Comparison
 
 #### 6.1 Summary
 
@@ -452,7 +448,7 @@ summary(results)
 
 ```
 
-#### 6.2 Comparison Plots (Barplot and Boxplot of Model Performace)
+#### 6.2 Comparison Plots (Barplot and Boxplot of Model Performance)
 
 ```{r}
 # Boxplot for Accuracy
@@ -625,7 +621,7 @@ positives.
 -   **K-Nearest Neighbour** performed least well, at 0.746, showing it
     had more false positives and less effective in ID actual deaths.
 
-### 7. Hyperparameter Tuning
+### 7. Hyper-parameter Tuning
 
 #### 7.1 K-Nearest Neighbours (KNN)
 
@@ -740,11 +736,11 @@ the PC score. Each arrow represents a variable and coneys:
 
     -   perpendicular = uncorrelated
 
-This helps us visually see the clutering between survived (0) and died
+This helps us visually see the clustering between survived (0) and died
 (1).
 
-We can see that variables like `serum_creatine` and `age` arrows are
-**long and point right**, therfore they strongly contribute to PC1.
+We can see that variables like `serum_creatinine` and `age` arrows are
+**long and point right**, therefore they strongly contribute to PC1.
 
 `ejection_fraction` and `serum_sodium` point towards the **upper-left**
 quadrant of the plot, and it has moderate positive loading on PC2, but
@@ -753,12 +749,12 @@ negative on PC1.
 `time` points **bottom-left,** meaning it loads negatively on PC1 and
 PC2.
 
-`creatine_phosphokinase` points **downward**, and it contributes mostly
-negatively to PC2
+`creatinine_phosphokinase` points **downward**, and it contributes
+mostly negatively to PC2
 
 `platlets` points **left**, indicating a negative PC1 loading
 
-#### 8.3 PC1 vs. PC2 Scatterplot
+#### 8.3 PC1 vs. PC2 Scatter-plot
 
 This plot visualizes patients in the PCA space, colored by survival
 outcome.
@@ -775,9 +771,9 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = DEATH_EVENT)) +
   theme_minimal()
 ```
 
-The scatterplot explores how individual points lie in PCA space. It
+The scatter-plot explores how individual points lie in PCA space. It
 shows the spatial grouping of `DEATH_EVENT` classes, but it is not
-perfectly seperable. It also shows that PCA doesn't fully separate
+perfectly separable. It also shows that PCA doesn't fully separate
 classes but shows patterns instead.
 
 ### 9. K-Means Clustering
@@ -811,5 +807,5 @@ patients. Compared to the other scatter plot above which used
 data and no knowledge of survival outcomes. The plot shows two distinct
 clusters, which indicates the dataset has a natural structure, and the
 patients are grouped based on similar features (ex. `age`,
-`serum_creatine`, etc) which had a strong impact on patterns found by
+`serum_creatinine`, etc) which had a strong impact on patterns found by
 PCA (plots above).
